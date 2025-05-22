@@ -1,19 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { FaGoogle, FaApple, FaMicrosoft } from "react-icons/fa";
 import Image from "next/image";
-import oracledb from "oracledb";
-
-export async function getOracleConnection() {
-  return await oracledb.getConnection({
-    user: process.env.ORACLE_USER,
-    password: process.env.ORACLE_PASSWORD,
-    connectString: process.env.ORACLE_CONNECT_STRING, // e.g. "localhost/XE"
-  });
-}
+import { useRouter } from "next/navigation";
 
 export default function Login() {
+  const router = useRouter();
   const [tab, setTab] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -24,21 +17,119 @@ export default function Login() {
   const [regPhone, setRegPhone] = useState("");
   const [regPassword, setRegPassword] = useState("");
   const [regConfirm, setRegConfirm] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
-  const handleLogin = (e: React.FormEvent) => {
+  // Check if user is already logged in
+  useEffect(() => {
+    async function checkAuth() {
+      try {
+        const response = await fetch('/api/auth/profile');
+        if (response.ok) {
+          // User is already logged in, redirect to dashboard
+          router.push('/dashboard');
+        }
+      } catch (error) {
+        // Not logged in, stay on login page
+        console.error("Auth check error:", error);
+      }
+    }
+    
+    checkAuth();
+  }, [router]);
+
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    alert(`Login\nEmail: ${email}\nPassword: ${password}`);
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Login failed');
+      }
+
+      // Success - show message then redirect
+      setSuccess("Login successful! Redirecting to dashboard...");
+      
+      // Short delay before redirect for better UX
+      setTimeout(() => {
+        router.push('/dashboard');
+      }, 1000);
+      
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred during login');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleRegister = (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
+    
     if (regPassword !== regConfirm) {
-      alert("Passwords do not match!");
+      setError("Passwords do not match!");
       return;
     }
-    alert(
-      `Register\nName: ${regName}\nEmail: ${regEmail}\nCountry: ${regCountry}\nPhone: ${regPhone}\nPassword: ${regPassword}`
-    );
+
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const response = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: regName,
+          email: regEmail,
+          country: regCountry,
+          phone: regPhone,
+          password: regPassword
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Registration failed');
+      }
+
+      // Success - switch to login tab and show success message
+      setTab('login');
+      setSuccess('Registration successful! Please log in with your new account.');
+      
+      // Clear register form
+      setRegName("");
+      setRegEmail("");
+      setRegCountry("");
+      setRegPhone("");
+      setRegPassword("");
+      setRegConfirm("");
+      
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred during registration');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSocialLogin = (provider: string) => {
+    setError(`Social login with ${provider} is not configured yet.`);
+    // Implementation would depend on your authentication strategy with Oracle DB
   };
 
   const socialBtn =
@@ -99,6 +190,18 @@ export default function Login() {
           </button>
         </div>
         <div className="p-8">
+          {error && (
+            <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg">
+              {error}
+            </div>
+          )}
+          
+          {success && (
+            <div className="mb-4 p-3 bg-green-100 text-green-700 rounded-lg">
+              {success}
+            </div>
+          )}
+          
           {tab === "login" ? (
             <form onSubmit={handleLogin} className="flex flex-col gap-4">
               <label className="font-semibold text-gray-700">Email</label>
@@ -129,29 +232,30 @@ export default function Login() {
               </div>
               <button
                 type="submit"
-                className="bg-blue-600 text-white py-2 rounded-full font-bold tracking-wide shadow-lg hover:bg-blue-700 transition"
+                className="bg-blue-600 text-white py-2 rounded-full font-bold tracking-wide shadow-lg hover:bg-blue-700 transition disabled:opacity-70 disabled:cursor-not-allowed"
+                disabled={loading}
               >
-                Login
+                {loading ? 'Logging in...' : 'Login'}
               </button>
               <div className="flex flex-col gap-2 mt-2">
                 <button
                   type="button"
                   className={`${socialBtn} bg-white border border-blue-100 text-gray-700 hover:bg-blue-50`}
-                  onClick={() => alert("Login with Google")}
+                  onClick={() => handleSocialLogin('Google')}
                 >
                   <FaGoogle className="text-red-500" /> Login with Google
                 </button>
                 <button
                   type="button"
                   className={`${socialBtn} bg-white border border-blue-100 text-gray-700 hover:bg-blue-50`}
-                  onClick={() => alert("Login with Apple")}
+                  onClick={() => handleSocialLogin('Apple')}
                 >
                   <FaApple className="text-gray-800" /> Login with Apple
                 </button>
                 <button
                   type="button"
                   className={`${socialBtn} bg-white border border-blue-100 text-gray-700 hover:bg-blue-50`}
-                  onClick={() => alert("Login with Microsoft")}
+                  onClick={() => handleSocialLogin('Microsoft')}
                 >
                   <FaMicrosoft className="text-blue-700" /> Login with Microsoft
                 </button>
@@ -215,29 +319,30 @@ export default function Login() {
               />
               <button
                 type="submit"
-                className="bg-blue-600 text-white py-2 rounded-full font-bold tracking-wide shadow-lg hover:bg-blue-700 transition"
+                className="bg-blue-600 text-white py-2 rounded-full font-bold tracking-wide shadow-lg hover:bg-blue-700 transition disabled:opacity-70 disabled:cursor-not-allowed"
+                disabled={loading}
               >
-                Register
+                {loading ? 'Registering...' : 'Register'}
               </button>
               <div className="flex flex-col gap-2 mt-2">
                 <button
                   type="button"
                   className={`${socialBtn} bg-white border border-blue-100 text-gray-700 hover:bg-blue-50`}
-                  onClick={() => alert("Register with Google")}
+                  onClick={() => handleSocialLogin('Google')}
                 >
                   <FaGoogle className="text-red-500" /> Register with Google
                 </button>
                 <button
                   type="button"
                   className={`${socialBtn} bg-white border border-blue-100 text-gray-700 hover:bg-blue-50`}
-                  onClick={() => alert("Register with Apple")}
+                  onClick={() => handleSocialLogin('Apple')}
                 >
                   <FaApple className="text-gray-800" /> Register with Apple
                 </button>
                 <button
                   type="button"
                   className={`${socialBtn} bg-white border border-blue-100 text-gray-700 hover:bg-blue-50`}
-                  onClick={() => alert("Register with Microsoft")}
+                  onClick={() => handleSocialLogin('Microsoft')}
                 >
                   <FaMicrosoft className="text-blue-700" /> Register with Microsoft
                 </button>
@@ -249,4 +354,3 @@ export default function Login() {
     </div>
   );
 }
-
