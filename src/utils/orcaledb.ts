@@ -1,19 +1,34 @@
-// utils/oracledb.ts - Fixed with environment variable validation
+// utils/oracledb.ts - Updated to fix NJS-138 error
 import * as oracledb from 'oracledb';
 
-// Safe initialization function
-function safeInitOracleClient(options?: { libDir?: string }) {
+// Initialize Oracle client with Thick mode for better compatibility
+function initializeOracleClient() {
   try {
-    if (options && options.libDir && typeof oracledb.initOracleClient === 'function') {
-      // Only call if libDir is specified
-      return oracledb.initOracleClient(options);
+    // Check if we're on the server side
+    if (typeof window !== 'undefined') {
+      return;
     }
-    // Otherwise do nothing
-    return;
+
+    // Initialize Oracle client in Thick mode for better database version support
+    if (typeof oracledb.initOracleClient === 'function') {
+      try {
+        // Try to initialize with Thick mode
+        oracledb.initOracleClient({
+          // Uncomment and set the path if Oracle Instant Client is installed
+          // libDir: '/opt/oracle/instantclient'
+        });
+        console.log('Oracle client initialized in Thick mode');
+      } catch (err) {
+        console.warn('Oracle client Thick mode initialization failed, using Thin mode:', err);
+      }
+    }
   } catch (err) {
-    console.warn('Oracle client initialization skipped or failed:', err);
+    console.warn('Oracle client initialization warning:', err);
   }
 }
+
+// Call initialization immediately
+initializeOracleClient();
 
 // Validate environment variables
 function validateEnvVars() {
@@ -39,20 +54,26 @@ function validateEnvVars() {
   }
 }
 
-// Get Oracle connection configuration with fallback values
+// Get Oracle connection configuration
 function getDbConfig() {
-  // Validate environment variables first
   validateEnvVars();
   
-  // Return the configuration
   return {
     user: process.env.ORACLE_USER!,
     password: process.env.ORACLE_PASSWORD!,
     connectString: process.env.ORACLE_CONNECTION_STRING!,
     // Connection pool configuration
-    poolMin: 2,
-    poolMax: 5,
-    poolIncrement: 1
+    poolMin: 1,
+    poolMax: 4,
+    poolIncrement: 1,
+    poolTimeout: 60,
+    // Enhanced compatibility settings
+    edition: '',
+    events: false,
+    externalAuth: false,
+    homogeneous: true,
+    poolPingInterval: 60,
+    stmtCacheSize: 30
   };
 }
 
@@ -60,7 +81,7 @@ function getDbConfig() {
 let pool: oracledb.Pool | null = null;
 
 /**
- * Initialize the Oracle connection pool (if not already initialized)
+ * Initialize the Oracle connection pool
  */
 export async function initialize(): Promise<void> {
   if (typeof window !== 'undefined') {
@@ -69,26 +90,63 @@ export async function initialize(): Promise<void> {
   
   if (!pool) {
     try {
-      // Safely initialize Oracle client if needed
-      safeInitOracleClient();
-      
-      // Get validated database configuration
       const dbConfig = getDbConfig();
       
-      console.log('Connecting to Oracle DB with config:', {
+      console.log('Connecting to Oracle DB:', {
         user: dbConfig.user,
         connectString: dbConfig.connectString,
-        // Don't log the password for security reasons
         poolMin: dbConfig.poolMin,
         poolMax: dbConfig.poolMax,
       });
       
-      // Create a connection pool
       pool = await oracledb.createPool(dbConfig);
       console.log('Oracle connection pool created successfully');
+      
+      // Test the connection
+      await testConnection();
+      
     } catch (err) {
       console.error('Error creating Oracle connection pool:', err);
+      
+      if (err instanceof Error && err.message.includes('NJS-138')) {
+        console.error('\n🔧 ORACLE VERSION COMPATIBILITY ISSUE:');
+        console.error('Your Oracle database version is not supported in Thin mode.');
+        console.error('Solutions:');
+        console.error('1. Install Oracle Instant Client for Thick mode support');
+        console.error('2. Use a newer Oracle database version');
+        console.error('3. Check your connection string format');
+      }
+      
       throw err;
+    }
+  }
+}
+
+/**
+ * Test the Oracle connection
+ */
+async function testConnection(): Promise<void> {
+  let connection: oracledb.Connection | undefined;
+  
+  try {
+    if (!pool) {
+      throw new Error('Connection pool not initialized');
+    }
+    
+    connection = await pool.getConnection();
+    const result = await connection.execute('SELECT 1 FROM DUAL');
+    console.log('✅ Oracle connection test successful');
+    
+  } catch (err) {
+    console.error('Oracle connection test failed:', err);
+    throw err;
+  } finally {
+    if (connection) {
+      try {
+        await connection.close();
+      } catch (err) {
+        console.error('Error closing test connection:', err);
+      }
     }
   }
 }
@@ -124,29 +182,33 @@ export async function execute<T = any>(
   let connection: oracledb.Connection | undefined;
   
   try {
-    // Initialize pool if not already initialized
     if (!pool) {
       await initialize();
     }
     
-    // Get a connection from the pool
     connection = await pool!.getConnection();
     
-    // Set default options
     const defaultOptions: oracledb.ExecuteOptions = {
       outFormat: oracledb.OUT_FORMAT_OBJECT,
       autoCommit: true
     };
     
-    // Execute the query
     const result = await connection.execute(sql, binds, { ...defaultOptions, ...options });
     
     return result.rows as T[];
   } catch (err) {
     console.error('Error executing Oracle query:', err);
+    
+    if (err instanceof Error) {
+      if (err.message.includes('NJS-138')) {
+        console.error('💡 Try installing Oracle Instant Client for better database version support');
+      } else if (err.message.includes('ORA-')) {
+        console.error('💡 This appears to be an Oracle database error - check your SQL and database state');
+      }
+    }
+    
     throw err;
   } finally {
-    // Release the connection back to the pool
     if (connection) {
       try {
         await connection.close();
