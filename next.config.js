@@ -1,4 +1,4 @@
-// next.config.js for Next.js 15 with Oracle DB and Turbopack support
+// next.config.js - Final fix for Turbopack with Oracle DB
 // @ts-nocheck
 
 /**
@@ -39,8 +39,11 @@ const nextConfig = {
     return config;
   },
   
+  // IMPORTANT: Do NOT use transpilePackages with oracledb when using Turbopack
+  // This line should be REMOVED or commented out to avoid the conflict
+  // transpilePackages: ['oracledb'], // <- REMOVE THIS LINE
+  
   // Use serverExternalPackages for oracledb (works with Turbopack)
-  // DO NOT use transpilePackages at the same time as it will cause conflicts
   serverExternalPackages: ['oracledb'],
   
   // Image configuration
@@ -53,12 +56,9 @@ const nextConfig = {
     ],
   },
   
-  // Other experimental features if needed
+  // Experimental features for Next.js 15
   experimental: {
-    // Turbopack configuration if needed
-    turbo: {
-      // Any specific Turbopack configuration can go here
-    },
+    // Other experimental features if needed
   },
 };
 
